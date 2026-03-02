@@ -104,7 +104,7 @@ def visualize_single_snapshot(nodes, ground_truth_t, prediction_t, time_point_t,
     采用每帧独立的线性标准化来清晰对比。
     """
     fig, axes = plt.subplots(1, 2, figsize=(11, 5.5), squeeze=False)
-    fig.suptitle(f"Inference at t={time_point_t:.3f}s (Per-Frame Linear Norm)", fontsize=16)
+    fig.suptitle(f"Inference at t={time_point_t:.3f}s", fontsize=16)
 
     triangulation = tri.Triangulation(nodes[:, 0], nodes[:, 1], triangles=faces)
 
@@ -179,7 +179,10 @@ def visualize_comparison(trajectory_data: Dict[str, Any],
 
         time_t = time_points[t_idx]
         
-        output_filename = os.path.join(output_dir, f"inference_t_{t_idx}.png")
+        if t_idx == 1:
+            output_filename = os.path.join(output_dir, f"inference_t_{t_idx}")
+        else:
+            output_filename = os.path.join(output_dir, f"inference_t_{t_idx}.png")
         
         # 调用新的可视化函数，不再需要传递 vmin/vmax
         visualize_single_snapshot(nodes, gt_data, pred_data, time_t, output_filename, loss, error, faces)
@@ -187,13 +190,13 @@ def visualize_comparison(trajectory_data: Dict[str, Any],
 
 def main():
     """主函数"""
-    script_dir = pathlib.Path(__file__).parent.resolve()
+    base_dir = pathlib.Path(__file__).parent.resolve()
 
     # --- 硬编码配置 ---
-    checkpoint_path = str(script_dir / 'checkpoints' / 'best_model.pth')
-    data_path = str(script_dir / 'data_laser_hardening' / 'pde_trajectories.h5')
+    checkpoint_path = str(base_dir / 'checkpoints' / 'best_model.pth')
+    data_path = str(base_dir / 'data_laser_hardening' / 'pde_trajectories.h5')
     trajectory_key = 'trajectory_38'
-    output_dir = str(script_dir / 'inference_results')
+    output_dir = str(base_dir / 'inference_results')
     # --------------------
 
     # 确保输出目录存在
@@ -232,11 +235,7 @@ def main():
     # All old geometry pre-computation is now removed as it's handled by model.forward.
 
     # 3. 计算需要可视化的索引
-    total_steps = len(trajectory_data['time_points']) - 1
-    snapshot_indices = sorted(list(set([
-        0, 1, int(total_steps * 0.25), int(total_steps * 0.5), 
-        int(total_steps * 0.75), total_steps
-    ])))
+    snapshot_indices = [0, 30, 60, 9, 120]
     
     prediction_history = np.zeros_like(trajectory_data['node_features'])
     

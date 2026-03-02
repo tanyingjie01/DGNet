@@ -17,6 +17,7 @@ Description:
 """
 
 import os
+import pathlib
 import h5py
 import numpy as np
 import dolfinx
@@ -34,11 +35,12 @@ from scipy.interpolate import splev, splprep
 # --- 0. Simulation and Dataset Parameters ---
 # =============================================================================
 # --- Files and Paths ---
-output_dir = "gksNet/data_laser_hardening"
-h5_filename = os.path.join(output_dir, "pde_trajectories.h5")
-mesh_vis_filename = os.path.join(output_dir, "laser_mesh.png")
-snapshots_vis_filename = os.path.join(output_dir, "temperature_snapshots.png")
-source_vis_filename = os.path.join(output_dir, "source_snapshots.png")
+base_dir = pathlib.Path(__file__).parent.resolve()
+output_dir = base_dir / "data_laser_hardening"
+h5_filename = output_dir / "pde_trajectories.h5"
+mesh_vis_filename = output_dir / "laser_mesh.png"
+snapshots_vis_filename = output_dir / "temperature_snapshots.png"
+source_vis_filename = output_dir / "source_snapshots.png"
 
 # --- Geometry & Mesh Parameters ---
 tank_w, tank_h = 1.4, 0.9
@@ -389,7 +391,8 @@ def initialize_lasers(num_lasers, geom_params):
 # =============================================================================
 def generate_dataset():
     comm = MPI.COMM_WORLD
-    if comm.rank == 0 and not os.path.exists(output_dir): os.makedirs(output_dir)
+    if comm.rank == 0 and not output_dir.exists():
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     if comm.rank == 0: print("--- 1. Generating shared mesh ---")
     domain, facet_tags = create_mesh_with_tags(comm)

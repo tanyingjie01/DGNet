@@ -1,0 +1,28 @@
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+env/
+
+# IDE config
+.idea/
+.vscode/
+
+# Logs, outputs, models
+*.log
+*.ckpt
+*.pth
+*.pt
+*.safetensors
+*.bin
+*.pkl
+*.bin
+results/
+runs/
+logs/
+
+# data
+*.h5

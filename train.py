@@ -10,9 +10,6 @@ import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 import h5py
 
-# 移除与DDP冲突的GPU指定
-# os.environ['CUDA_VISIBLE_DEVICES'] = '3'
-
 # 导入GKSNet模块
 from gks_net import GKSNet, Loss, GKSTrainer
 from dataset import GKSPdeDataset, create_gks_loader
@@ -36,8 +33,8 @@ def main():
     world_size = int(os.environ["WORLD_SIZE"])
 
     # 数据目录设置
-    script_dir = pathlib.Path(__file__).parent.resolve()
-    data_path_absolute = script_dir / 'data_laser_hardening' / 'pde_trajectories.h5'
+    base_dir = pathlib.Path(__file__).parent.resolve()
+    data_path_absolute = base_dir / 'data_laser_hardening' / 'pde_trajectories.h5'
 
     # 简单配置
     config = {
@@ -60,16 +57,17 @@ def main():
         'residual_num_layers': 5,
         
         # 训练配置
-        'num_epochs': 600,
+        'num_epochs': 40,
         'learning_rate': 5e-4,
-        'lr_decay_step_size': 200,
+        'lr_decay_step_size': 20,
         'lr_decay_gamma': 0.1,
         
         # DDP rank
         'rank': rank,
         
         # 设备配置 (DDP中不再需要device配置，直接使用local_rank)
-        'save_dir': './checkpoints',
+        'save_dir': str(base_dir / 'checkpoints'),
+        'checkpoint_dir': str(base_dir / 'checkpoints'),
         'log_interval': 1,
     }
     
