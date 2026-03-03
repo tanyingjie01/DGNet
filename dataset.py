@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional, Callable
 from abc import ABC, abstractmethod
 
 
-class GKSGraph:
+class DGGraph:
     """
     GKSNets的核心数据结构类，封装单个PDE训练轨迹的完整信息
     
@@ -235,7 +235,7 @@ class BaseTransform(ABC):
     """数据变换基类，定义统一的变换接口"""
     
     @abstractmethod
-    def __call__(self, data: GKSGraph) -> GKSGraph:
+    def __call__(self, data: DGGraph) -> DGGraph:
         """应用变换到GKSGraph数据"""
         pass
 
@@ -263,7 +263,7 @@ class Normalize(BaseTransform):
         # 统计量将在第一次调用时计算
         self.stats = {}
     
-    def __call__(self, data: GKSGraph) -> GKSGraph:
+    def __call__(self, data: DGGraph) -> DGGraph:
         """应用归一化变换"""
         data_copy = self._copy_data(data)
         
@@ -291,7 +291,7 @@ class Normalize(BaseTransform):
         
         return (tensor - self.stats[key]['mean']) / self.stats[key]['std']
     
-    def _copy_data(self, data: GKSGraph) -> GKSGraph:
+    def _copy_data(self, data: DGGraph) -> DGGraph:
         """深拷贝数据结构"""
         # 深拷贝边界条件信息
         boundary_info_copy = {}
@@ -303,7 +303,7 @@ class Normalize(BaseTransform):
                 else:
                     boundary_info_copy[bc_type][key] = value
         
-        return GKSGraph(
+        return DGGraph(
             nodes=data.nodes.clone(),
             edges=data.edges.clone(),
             faces=data.faces.clone(),
@@ -343,7 +343,7 @@ class AddNoise(BaseTransform):
         self.add_to_source = add_to_source
         self.add_to_initial = add_to_initial
     
-    def __call__(self, data: GKSGraph) -> GKSGraph:
+    def __call__(self, data: DGGraph) -> DGGraph:
         """应用噪声变换"""
         data_copy = self._copy_data(data)
         
@@ -362,7 +362,7 @@ class AddNoise(BaseTransform):
         
         return data_copy
     
-    def _copy_data(self, data: GKSGraph) -> GKSGraph:
+    def _copy_data(self, data: DGGraph) -> DGGraph:
         """深拷贝数据结构"""
         # 深拷贝边界条件信息
         boundary_info_copy = {}
@@ -374,7 +374,7 @@ class AddNoise(BaseTransform):
                 else:
                     boundary_info_copy[bc_type][key] = value
         
-        return GKSGraph(
+        return DGGraph(
             nodes=data.nodes.clone(),
             edges=data.edges.clone(),
             faces=data.faces.clone(),
@@ -404,13 +404,13 @@ class Compose(BaseTransform):
         """
         self.transforms = transforms
         
-    def __call__(self, data: GKSGraph) -> GKSGraph:
+    def __call__(self, data: DGGraph) -> DGGraph:
         """按顺序应用所有变换"""
         for transform in self.transforms:
             data = transform(data)
         return data
 
-class GKSPdeDataset(Dataset):
+class DGPdeDataset(Dataset):
     """
     GKSNet的PyTorch数据集类
     
@@ -520,7 +520,7 @@ class GKSPdeDataset(Dataset):
                     chunk_initial_condition = full_node_features[start_idx]
                     
                 # 为当前块创建一个 GKSGraph 实例
-                    gks_graph_chunk = GKSGraph(
+                    dg_graph_chunk = DGGraph(
                         nodes=nodes,
                         edges=edges,
                         faces=faces,
@@ -532,7 +532,7 @@ class GKSPdeDataset(Dataset):
                     trajectory_id=traj_key,
                     )
                     
-                    self.samples.append(gks_graph_chunk)
+                    self.samples.append(dg_graph_chunk)
         
         if self.rank == 0:
             print(f"数据加载完成：共生成 {len(self.samples)} 个短轨迹样本。")
@@ -541,12 +541,12 @@ class GKSPdeDataset(Dataset):
         """返回数据集中短轨迹样本的总数"""
         return len(self.samples)
 
-    def __getitem__(self, index: int) -> GKSGraph:
+    def __getitem__(self, index: int) -> DGGraph:
         """获取一个经过切分的短轨迹样本"""
         return self.samples[index]
 
 
-def gks_collate_fn(batch_list: List[GKSGraph]) -> Dict[str, Any]:
+def dg_collate_fn(batch_list: List[DGGraph]) -> Dict[str, Any]:
     """
     自定义批处理函数，将多个GKSGraph合并为一个批次字典
     对于GKSNets，我们需要保持每个图的独立性，同时支持batch处理，因此需要自定义批处理函数
@@ -594,7 +594,7 @@ def gks_collate_fn(batch_list: List[GKSGraph]) -> Dict[str, Any]:
     return batch_data
 
 # 创建数据加载器，用于加载数据集
-def create_gks_loader(dataset: GKSPdeDataset,
+def create_dg_loader(dataset: DGPdeDataset,
                      batch_size: int = 32,
                      shuffle: bool = True,
                      num_workers: int = 8,
@@ -627,7 +627,7 @@ def create_gks_loader(dataset: GKSPdeDataset,
         shuffle=shuffle,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        collate_fn=gks_collate_fn,
+        collate_fn=dg_collate_fn,
         sampler=sampler,
         **kwargs
     )

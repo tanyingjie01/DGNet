@@ -102,7 +102,7 @@ def compute_state_error(pred: torch.Tensor, target: torch.Tensor) -> float:
         error = torch.norm(pred - target) / torch.norm(target)
         return error.item()
 
-class GKSNet(nn.Module):
+class DGNet(nn.Module):
     """
     Green Kernel Superposition Networks主模型
     
@@ -338,7 +338,7 @@ class Loss(nn.Module):
             'final_step_loss': final_step_loss,
         }
 
-class GKSTrainer:
+class DGTrainer:
     """
     GKSNets的训练器
     
@@ -346,7 +346,7 @@ class GKSTrainer:
     """
     
     def __init__(self, 
-                 model: GKSNet,
+                 model: DGNet,
                  optimizer: optim.Optimizer,
                  loss_fn: Loss,
                  config: Dict[str, Any],

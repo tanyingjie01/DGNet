@@ -24,9 +24,9 @@ import pathlib
 from typing import Dict, Any, List
 
 # 导入GKSNet模块
-from gks_net import GKSNet
+from dgnet import DGNet
 # from physics import build_operator, GreenKernelCalculator # No longer needed
-from dataset import GKSGraph # 仅用于类型提示和结构参考
+from dataset import DGGraph # 仅用于类型提示和结构参考
 
 def compute_state_error(pred: torch.Tensor, target: torch.Tensor) -> float:
     """计算预测与目标之间的相对误差"""
@@ -41,7 +41,7 @@ def compute_state_error(pred: torch.Tensor, target: torch.Tensor) -> float:
         error = torch.norm(pred - target) / target_norm
         return error.item()
 
-def load_model_from_checkpoint(checkpoint_path: str, device: torch.device) -> GKSNet:
+def load_model_from_checkpoint(checkpoint_path: str, device: torch.device) -> DGNet:
     """从检查点加载模型"""
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"检查点文件不存在: {checkpoint_path}")
@@ -50,7 +50,7 @@ def load_model_from_checkpoint(checkpoint_path: str, device: torch.device) -> GK
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     config = checkpoint['config']
     
-    model = GKSNet(config)
+    model = DGNet(config)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     model.eval()  # 设置为评估模式
@@ -195,6 +195,10 @@ def main():
     # --- 硬编码配置 ---
     checkpoint_path = str(base_dir / 'checkpoints' / 'best_model.pth')
     data_path = str(base_dir / 'data_laser_hardening' / 'pde_trajectories.h5')
+    # trajectory_38 is in the validation split used by train.py under lexicographic ordering.
+    # Validation set there is:
+    # ['trajectory_4', 'trajectory_5', 'trajectory_6', 'trajectory_7',
+    #  'trajectory_8', 'trajectory_9', 'trajectory_38', 'trajectory_39']
     trajectory_key = 'trajectory_38'
     output_dir = str(base_dir / 'inference_results')
     # --------------------
@@ -221,7 +225,7 @@ def main():
     boundary_info = {k: {k2: v2.to(device) for k2, v2 in v.items()} for k, v in trajectory_data['boundary_info'].items()}
     
     # GKSGraph is used to conveniently calculate geometric properties
-    temp_gks_graph = GKSGraph(
+    temp_dg_graph = DGGraph(
         nodes=nodes, edges=edges, faces=faces,
         node_features=torch.zeros_like(source_terms),
         source_terms=torch.zeros_like(source_terms),
@@ -229,13 +233,13 @@ def main():
         time_points=time_points,
         boundary_info=boundary_info
     )
-    node_volumes = temp_gks_graph.node_volumes
-    node_type = temp_gks_graph.node_type
+    node_volumes = temp_dg_graph.node_volumes
+    node_type = temp_dg_graph.node_type
     
     # All old geometry pre-computation is now removed as it's handled by model.forward.
 
     # 3. 计算需要可视化的索引
-    snapshot_indices = [0, 30, 60, 9, 120]
+    snapshot_indices = [0, 30, 60, 90, 120]
     
     prediction_history = np.zeros_like(trajectory_data['node_features'])
     

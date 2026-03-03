@@ -11,8 +11,8 @@ from torch.utils.data.distributed import DistributedSampler
 import h5py
 
 # 导入GKSNet模块
-from gks_net import GKSNet, Loss, GKSTrainer
-from dataset import GKSPdeDataset, create_gks_loader
+from dgnet import DGNet, Loss, DGTrainer
+from dataset import DGPdeDataset, create_dg_loader
 
 def setup_ddp():
     """初始化DDP环境"""
@@ -57,10 +57,10 @@ def main():
         'residual_num_layers': 5,
         
         # 训练配置
-        'num_epochs': 40,
+        'num_epochs': 15,
         'learning_rate': 5e-4,
-        'lr_decay_step_size': 20,
-        'lr_decay_gamma': 0.1,
+        'lr_decay_step_size': 5,
+        'lr_decay_gamma': 0.2,
         
         # DDP rank
         'rank': rank,
@@ -94,6 +94,11 @@ def main():
         print("\n1. 加载数据...")
     # 按轨迹划分训练/验证，完全隔离，避免数据泄露
     with h5py.File(config['data_path'], 'r') as f:
+        # NOTE (important): keys are sorted lexicographically (string order),
+        # not numerically. For 40 trajectories named trajectory_0...trajectory_39,
+        # the last 20% validation trajectories are exactly:
+        # ['trajectory_4', 'trajectory_5', 'trajectory_6', 'trajectory_7',
+        #  'trajectory_8', 'trajectory_9', 'trajectory_38', 'trajectory_39']
         all_traj_keys = sorted(list(f.keys()))
     total_traj = len(all_traj_keys)
     if total_traj < 2:
@@ -108,13 +113,13 @@ def main():
         print(f"   训练轨迹数: {len(train_traj_keys)}")
         print(f"   验证轨迹数: {len(val_traj_keys)}")
 
-    train_dataset = GKSPdeDataset(
+    train_dataset = DGPdeDataset(
         data_path=config['data_path'],
         train_time_steps=config['train_time_steps'],
         rank=rank,
         trajectory_keys=train_traj_keys
     )
-    val_dataset = GKSPdeDataset(
+    val_dataset = DGPdeDataset(
         data_path=config['data_path'],
         train_time_steps=config['train_time_steps'],
         rank=rank,
@@ -129,14 +134,14 @@ def main():
     val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank)
 
     # 创建数据加载器
-    train_loader = create_gks_loader(
+    train_loader = create_dg_loader(
         train_dataset, 
         batch_size=config['batch_size'],
         shuffle=False,  # shuffle由sampler控制
         num_workers=config['num_workers'],
         sampler=train_sampler
     )
-    val_loader = create_gks_loader(
+    val_loader = create_dg_loader(
         val_dataset,
         batch_size=config['batch_size'],
         shuffle=False,  # shuffle由sampler控制
@@ -147,7 +152,7 @@ def main():
     # 创建模型
     if rank == 0:
         print("\n2. 创建模型...")
-    model = GKSNet(config)
+    model = DGNet(config)
     if rank == 0:
         print(f"   模型参数数量: {sum(p.numel() for p in model.parameters()):,}")
     
@@ -161,7 +166,7 @@ def main():
     )
     
     # 创建训练器
-    trainer = GKSTrainer(model, optimizer, loss_fn, config, rank=rank, local_rank=local_rank, scheduler=scheduler)
+    trainer = DGTrainer(model, optimizer, loss_fn, config, rank=rank, local_rank=local_rank, scheduler=scheduler)
     
     # 开始训练
     if rank == 0:
