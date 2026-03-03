@@ -31,9 +31,9 @@ def compute_state_error(pred: torch.Tensor, target: torch.Tensor) -> float:
 def load_model_from_checkpoint(checkpoint_path: str, device: torch.device) -> DGNet:
     """Load DGNet from checkpoint."""
     if not os.path.exists(checkpoint_path):
-        raise FileNotFoundError(f"检查点文件不存在: {checkpoint_path}")
+        raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
     
-    print(f"正在从 '{checkpoint_path}' 加载模型...")
+    print(f"Loading model from '{checkpoint_path}'...")
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     config = checkpoint['config']
     
@@ -42,15 +42,15 @@ def load_model_from_checkpoint(checkpoint_path: str, device: torch.device) -> DG
     model.to(device)
     model.eval()
     
-    print("模型加载成功。")
+    print("Model loaded successfully.")
     return model
 
 def get_trajectory_data(data_path: str, trajectory_key: str) -> Dict[str, np.ndarray]:
     """Load one trajectory from HDF5."""
-    print(f"正在从 '{data_path}' 加载轨迹 '{trajectory_key}'...")
+    print(f"Loading trajectory '{trajectory_key}' from '{data_path}'...")
     with h5py.File(data_path, 'r') as f:
         if trajectory_key not in f:
-            raise KeyError(f"在HDF5文件中未找到轨迹: {trajectory_key}")
+            raise KeyError(f"Trajectory not found in HDF5 file: {trajectory_key}")
         
         traj_group = f[trajectory_key]
         
@@ -81,7 +81,7 @@ def get_trajectory_data(data_path: str, trajectory_key: str) -> Dict[str, np.nda
                 }
         data['boundary_info'] = boundary_info
         
-    print("轨迹数据加载完成。")
+    print("Trajectory data loaded.")
     return data
 
 def visualize_single_snapshot(nodes, ground_truth_t, prediction_t, time_point_t, output_filename, loss, error, faces):
@@ -127,7 +127,6 @@ def visualize_single_snapshot(nodes, ground_truth_t, prediction_t, time_point_t,
     
     plt.savefig(output_filename)
     plt.close(fig)
-    print(f"可视化结果已保存至: {output_filename}")
 
 
 def visualize_comparison(trajectory_data: Dict[str, Any], 
@@ -143,7 +142,7 @@ def visualize_comparison(trajectory_data: Dict[str, Any],
     
     loss_fn = torch.nn.MSELoss()
 
-    print("\n正在生成可视化图像...")
+    print("\nGenerating visualizations...")
     for t_idx in snapshot_indices:
         gt_data = ground_truth[t_idx, :, 0]
         pred_data = prediction_history[t_idx, :, 0]
@@ -160,6 +159,8 @@ def visualize_comparison(trajectory_data: Dict[str, Any],
         
         visualize_single_snapshot(nodes, gt_data, pred_data, time_t, output_filename, loss, error, faces)
 
+    print("Visualizations saved.")
+
 
 def main():
     """Run inference and export figures."""
@@ -175,7 +176,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"使用设备: {device}")
+    print(f"Using device: {device}")
 
     model = load_model_from_checkpoint(checkpoint_path, device)
     trajectory_data = get_trajectory_data(data_path, trajectory_key)
@@ -204,7 +205,7 @@ def main():
     
     prediction_history = np.zeros_like(trajectory_data['node_features'])
     
-    print("\n开始执行完整Free-Running推理...")
+    print("\nRunning full free-running inference...")
     with torch.no_grad():
         inference_batch = {
             'nodes': nodes, 'edges': edges, 'faces': faces,
@@ -219,7 +220,12 @@ def main():
         predictions = model(inference_batch)
         prediction_history = predictions['u_final'][0].cpu().numpy()
 
-    print("\n所有推理计算完成。")
+    print("\nAll inference computations completed.")
+    final_gt = true_trajectory[-1, :, 0].cpu()
+    final_pred = torch.from_numpy(prediction_history[-1, :, 0])
+    final_mse = torch.nn.functional.mse_loss(final_pred, final_gt).item()
+    final_rne = compute_state_error(final_pred, final_gt)
+    print(f"Final-step metrics - MSE: {final_mse:.4e}  |  RNE: {final_rne:.4f}")
     visualize_comparison(trajectory_data, prediction_history, snapshot_indices, output_dir)
 
 if __name__ == "__main__":
