@@ -1,6 +1,4 @@
-"""
-GKSNet简单训练脚本 - 用于验证代码架构
-"""
+"""DGNet training entrypoint (DDP)."""
 
 import os
 import torch
@@ -10,108 +8,91 @@ import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 import h5py
 
-# 导入GKSNet模块
 from dgnet import DGNet, Loss, DGTrainer
 from dataset import DGPdeDataset, create_dg_loader
 
 def setup_ddp():
-    """初始化DDP环境"""
+    """Initialize DDP runtime."""
     dist.init_process_group(backend='nccl')
     torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
 
 def cleanup_ddp():
-    """清理DDP环境"""
+    """Tear down DDP runtime."""
     dist.destroy_process_group()
 
 def main():
-    """主函数"""
-    
-    # 初始化DDP
+    """Run training."""
+
     setup_ddp()
     rank = int(os.environ["RANK"])
     local_rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
 
-    # 数据目录设置
     base_dir = pathlib.Path(__file__).parent.resolve()
     data_path_absolute = base_dir / 'data_laser_hardening' / 'pde_trajectories.h5'
 
-    # 简单配置
     config = {
-        # 数据配置
         'data_path': data_path_absolute,
         'batch_size': 4,
         'num_workers': 2,
-        'train_time_steps': 7, # 定义训练时使用的子轨迹时间步长度 M
-        
-        # 模型配置
+        'train_time_steps': 7,
+
         'spatial_dim': 2,
         'feature_dim': 1,
         'output_dim': 1,
         'operator_type': 'laplace',
-        
-        # 网络结构配置
+
         'operator_hidden_dim': 64,
         'operator_num_layers': 3,
         'residual_hidden_dim': 128,
         'residual_num_layers': 5,
-        
-        # 训练配置
+
         'num_epochs': 15,
         'learning_rate': 5e-4,
         'lr_decay_step_size': 5,
         'lr_decay_gamma': 0.2,
-        
-        # DDP rank
+
         'rank': rank,
-        
-        # 设备配置 (DDP中不再需要device配置，直接使用local_rank)
+
         'save_dir': str(base_dir / 'checkpoints'),
         'checkpoint_dir': str(base_dir / 'checkpoints'),
         'log_interval': 1,
     }
-    
-    # 只有主进程打印信息
+
     if rank == 0:
-        print("GKSNet架构验证训练 (DDP模式)")
-        print(f"检测到 {world_size} 个GPUs.")
-        print(f"数据路径: {config['data_path']}")
-    
-    # 检查数据文件
+        print("DGNet architecture validation training (DDP)")
+        print(f"Detected {world_size} GPUs.")
+        print(f"Data path: {config['data_path']}")
+
     if not os.path.exists(config['data_path']):
-        # 只让主进程打印错误并退出，防止多进程重复打印
         if rank == 0:
-            print(f"错误: 数据文件不存在 - {config['data_path']}")
-            print("请确保数据文件存在后再运行")
+            print(f"Error: data file not found - {config['data_path']}")
+            print("Please ensure the data file exists before running.")
         return
-    
-    # 只有主进程创建保存目录
+
     if rank == 0:
         os.makedirs(config['save_dir'], exist_ok=True)
-    
-    # 加载数据
+
     if rank == 0:
-        print("\n1. 加载数据...")
-    # 按轨迹划分训练/验证，完全隔离，避免数据泄露
+        print("\nLoading data...")
+
     with h5py.File(config['data_path'], 'r') as f:
         # NOTE (important): keys are sorted lexicographically (string order),
         # not numerically. For 40 trajectories named trajectory_0...trajectory_39,
-        # the last 20% validation trajectories are exactly:
-        # ['trajectory_4', 'trajectory_5', 'trajectory_6', 'trajectory_7',
-        #  'trajectory_8', 'trajectory_9', 'trajectory_38', 'trajectory_39']
+        # the last 20% validation trajectories are exactly: ['trajectory_4', 'trajectory_5', 'trajectory_6', 'trajectory_7', 'trajectory_8', 'trajectory_9', 'trajectory_38', 'trajectory_39']
         all_traj_keys = sorted(list(f.keys()))
     total_traj = len(all_traj_keys)
     if total_traj < 2:
-        raise ValueError("轨迹数量不足，无法划分训练/验证集")
+        raise ValueError("Not enough trajectories to split train/validation sets.")
     split_idx = max(1, int(0.8 * total_traj))
     train_traj_keys = all_traj_keys[:split_idx]
     val_traj_keys = all_traj_keys[split_idx:]
     if len(val_traj_keys) == 0:
         val_traj_keys = [train_traj_keys.pop()]
     if rank == 0:
-        print(f"   轨迹总数: {total_traj}")
-        print(f"   训练轨迹数: {len(train_traj_keys)}")
-        print(f"   验证轨迹数: {len(val_traj_keys)}")
+        print(f"   Total trajectories: {total_traj}")
+        print(f"   Train trajectories: {len(train_traj_keys)}")
+        print(f"   Validation trajectories: {len(val_traj_keys)}")
 
     train_dataset = DGPdeDataset(
         data_path=config['data_path'],
@@ -125,38 +106,30 @@ def main():
         rank=rank,
         trajectory_keys=val_traj_keys
     )
-    if rank == 0:
-        print(f"   训练样本数: {len(train_dataset)}")
-        print(f"   验证样本数: {len(val_dataset)}")
-    
-    # 创建分布式采样器
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
     val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank)
 
-    # 创建数据加载器
     train_loader = create_dg_loader(
         train_dataset, 
         batch_size=config['batch_size'],
-        shuffle=False,  # shuffle由sampler控制
+        shuffle=False,
         num_workers=config['num_workers'],
         sampler=train_sampler
     )
     val_loader = create_dg_loader(
         val_dataset,
         batch_size=config['batch_size'],
-        shuffle=False,  # shuffle由sampler控制
+        shuffle=False,
         num_workers=config['num_workers'],
         sampler=val_sampler
     )
     
-    # 创建模型
     if rank == 0:
-        print("\n2. 创建模型...")
+        print("\nCreating model...")
     model = DGNet(config)
     if rank == 0:
-        print(f"   模型参数数量: {sum(p.numel() for p in model.parameters()):,}")
+        print(f"   Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
-    # 创建优化器和损失函数
     optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
     loss_fn = Loss(config)
     scheduler = optim.lr_scheduler.StepLR(
@@ -165,18 +138,15 @@ def main():
         gamma=config['lr_decay_gamma']
     )
     
-    # 创建训练器
     trainer = DGTrainer(model, optimizer, loss_fn, config, rank=rank, local_rank=local_rank, scheduler=scheduler)
-    
-    # 开始训练
+
     if rank == 0:
-        print("\n3. 开始训练...")
+        print("\nStarting training...")
     trainer.train(train_loader, val_loader, config['num_epochs'])
     
     if rank == 0:
-        print("\n训练完成！架构验证成功。")
+        print("\nTraining complete. Architecture validation succeeded.")
 
-    # 清理DDP
     cleanup_ddp()
 
 

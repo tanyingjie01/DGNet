@@ -31,46 +31,40 @@ import matplotlib.pyplot as plt
 import matplotlib.tri as tri
 from scipy.interpolate import splev, splprep
 
-# =============================================================================
-# --- 0. Simulation and Dataset Parameters ---
-# =============================================================================
-# --- Files and Paths ---
+# Files and Paths
 base_dir = pathlib.Path(__file__).parent.resolve()
 output_dir = base_dir / "data_laser_hardening"
 h5_filename = output_dir / "pde_trajectories.h5"
 mesh_vis_filename = output_dir / "laser_mesh.png"
 snapshots_vis_filename = output_dir / "temperature_snapshots.png"
-source_vis_filename = output_dir / "source_snapshots.png"
 
-# --- Geometry & Mesh Parameters ---
+# Geometry & Mesh Parameters
 tank_w, tank_h = 1.4, 0.9
 center_x, center_y = tank_w / 2, tank_h / 2
 gear_outer_r, gear_inner_r = 0.21, 0.18
 hole_r = 0.096 # Radius of the two side holes
 hole_offset = 0.45 # Horizontal offset of the side holes from the center
 
-# --- Physics & Time (Properties for Steel) ---
+# Physics & Time (Properties for Steel)
 rho = 7850.0       # Density (kg/m^3)
 specific_heat = 450.0  # Specific Heat (J/kg*K)
 conductivity = 50.0    # Thermal Conductivity (W/m*K)
 h_conv = 25.0        # Convective heat transfer coefficient (W/m^2*K)
 T_ambient = 298.15   # Ambient temperature (25°C in Kelvin)
 
-# --- Laser Parameters ---
+# Laser Parameters
 NUM_LASERS = 10
 MAX_SPEED = 0.8        # Max speed for linear movements (m/s)
 ANGULAR_VELOCITY = 1.0 # rad/s for orbital paths (will result in ~10 laps in 60s)
 
-# --- Time Discretization ---
+# Time Discretization
 T_sim = 60.0   # Total simulation time (seconds)
 dt = 0.5       # Time step size (seconds)
 
-# --- Dataset Parameters ---
+# Dataset Parameters
 NUM_TRAJECTORIES = 40 # Generate 5 independent simulation trajectories
 
-# =============================================================================
-# --- 1. Mesh Generation (Integrated) ---
-# =============================================================================
+# Mesh Generation (Integrated)
 def create_mesh_with_tags(comm: MPI.Comm):
     # This function is a self-contained copy of our final mesh script
     gmsh.initialize()
@@ -115,11 +109,9 @@ def create_mesh_with_tags(comm: MPI.Comm):
     gmsh.finalize()
     return domain, facet_tags
 
-# =============================================================================
-# --- 2. Physics Solvers Setup ---
-# =============================================================================
+# Physics Solvers Setup
 def setup_solvers(domain: mesh.Mesh, facet_tags: mesh.MeshTags):
-    # --- Thermal Problem ---
+    # Thermal Problem
     T_space = fem.functionspace(domain, ("Lagrange", 1))
     T_h, T_n = fem.Function(T_space, name="Temperature"), fem.Function(T_space)
     p, q = ufl.TrialFunction(T_space), ufl.TestFunction(T_space)
@@ -136,9 +128,7 @@ def setup_solvers(domain: mesh.Mesh, facet_tags: mesh.MeshTags):
     
     return problem_therm, T_n, T_h, T_space, Q_func
 
-# =============================================================================
-# --- 3. Laser Trajectory Generation ---
-# =============================================================================
+# 3. Laser Trajectory Generation
 class BasePath:
     def __init__(self, rng, geom_params):
         self.rng = rng
@@ -351,7 +341,7 @@ class BilliardPath(BasePath):
 def initialize_lasers(num_lasers, geom_params):
     rng = np.random.default_rng(seed=np.random.randint(0, 10000))
     
-    # --- New Logic: Ensure base paths + add random paths ---
+    # New logic: ensure base paths and add random paths
     lasers = []
     
     # 1. Force-assign the four core orbital paths (Specialists)
@@ -379,25 +369,19 @@ def initialize_lasers(num_lasers, geom_params):
         elif choice == 'billiard':
             lasers.append(BilliardPath(rng, geom_params))
     
-    print("\n--- Laser Configuration for this Run ---")
-    for i, laser in enumerate(lasers):
-        print(f"  Laser #{i+1}: {laser.describe()}")
-    print("----------------------------------------\n")
-
     return lasers
 
-# =============================================================================
-# --- 4. Dataset Generation ---
-# =============================================================================
+# Dataset Generation
 def generate_dataset():
     comm = MPI.COMM_WORLD
     if comm.rank == 0 and not output_dir.exists():
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    if comm.rank == 0: print("--- 1. Generating shared mesh ---")
+    if comm.rank == 0:
+        print("Generating mesh...")
     domain, facet_tags = create_mesh_with_tags(comm)
     
-    # --- Extract static mesh info once ---
+    # Extract static mesh info once
     domain.topology.create_connectivity(domain.topology.dim, 0) # cells to vertices
     domain.topology.create_connectivity(1, 0) # edges to vertices
     
@@ -414,7 +398,7 @@ def generate_dataset():
     edges_data = np.array(list(edge_set))
 
     if comm.rank == 0:
-        print(f"--- Mesh generated successfully with {num_nodes} nodes, {len(edges_data)} edges, {len(faces_data)} faces. ---")
+        print(f"Mesh ready: {num_nodes} nodes, {len(edges_data)} edges, {len(faces_data)} faces.")
         plt.figure(figsize=(12, 8))
         plt.triplot(nodes_coords[:, 0], nodes_coords[:, 1], faces_data, color='black', linewidth=0.5)
         plt.gca().set_aspect('equal', adjustable='box')
@@ -423,7 +407,7 @@ def generate_dataset():
         plt.ylabel("y (m)")
         plt.savefig(mesh_vis_filename)
         plt.close()
-        print(f"Mesh visualization saved to: {mesh_vis_filename}")
+        print(f"Saved mesh visualization: {mesh_vis_filename}")
 
     geom_params = {
         "tank_w": tank_w, "tank_h": tank_h, "center_x": center_x, "center_y": center_y,
@@ -433,24 +417,20 @@ def generate_dataset():
     }
 
     with h5py.File(h5_filename, 'w') as f:
+        if comm.rank == 0:
+            print(f"Generating {NUM_TRAJECTORIES} trajectories...")
         for i in range(NUM_TRAJECTORIES):
-            if comm.rank == 0:
-                print(f"\n--- Generating Trajectory {i}/{NUM_TRAJECTORIES-1} ---")
-
             traj_group = f.create_group(f"trajectory_{i}")
             
             time_points = np.arange(0, T_sim + dt, dt)
             num_time_steps = len(time_points)
             
-            if comm.rank == 0: print("  --- 2. Setting up physics solvers ---")
             prob_therm, T_n, T_h, T_s, Q_func = setup_solvers(domain, facet_tags)
             T_n.x.array[:] = T_ambient
             
             hists = { "node_features": np.zeros((num_time_steps, num_nodes, 1)),
                       "source_terms": np.zeros((num_time_steps, num_nodes, 1)) }
             hists["node_features"][0, :, 0] = T_ambient
-            
-            if comm.rank == 0: print(f"  --- 3. Starting time-stepping for trajectory {i} ---")
             
             lasers = initialize_lasers(NUM_LASERS, geom_params)
             
@@ -475,15 +455,13 @@ def generate_dataset():
                 hists["source_terms"][t_idx, :, 0] = Q_func.x.array
                 T_n.x.array[:] = T_h.x.array
                 
-            if comm.rank == 0: print(f"  --- 4. Saving trajectory {i} to HDF5 ---")
-            
             # Save all datasets according to the specified structure
             traj_group.create_dataset("nodes", data=nodes_coords.astype(np.float32))
             traj_group.create_dataset("edges", data=edges_data.astype(np.int32))
             traj_group.create_dataset("faces", data=faces_data.astype(np.int32))
             traj_group.create_dataset("node_features", data=hists["node_features"].astype(np.float32))
             
-            # 在保存前，对源项进行归一化处理 Q -> Q / (rho * c)
+            # Normalize source terms before saving: Q -> Q / (rho * c)
             normalized_source_terms = hists["source_terms"] / (rho * specific_heat)
             traj_group.create_dataset("source_terms", data=normalized_source_terms.astype(np.float32))
 
@@ -499,24 +477,17 @@ def generate_dataset():
             neumann_group.create_dataset("source_indices", data=np.array([], dtype=np.int32))
             neumann_group.create_dataset("target_indices", data=np.array([], dtype=np.int32))
 
-    # The main visualization function might need adjustment if it's meant to run after
-    # generating multiple trajectories. For now, we assume it visualizes the last one
-    # if the HDF5 file is re-read, or we can disable it if it causes issues.
-    # The current implementation will visualize trajectory_0 by default.
-    # A small change to visualize the last trajectory could be:
-    # f[f"trajectory_{NUM_TRAJECTORIES-1}/nodes"][:]
-    # But for now, we leave it as is.
+        if comm.rank == 0:
+            print(f"Saved dataset: {h5_filename}")
 
-# =============================================================================
-# --- 5. Visualization ---
-# =============================================================================
+# Visualization
 def visualize_results():
     if MPI.COMM_WORLD.rank != 0: return
-    print("\n--- 5. Starting visualization ---")
+    print("Generating visualizations...")
     with h5py.File(h5_filename, 'r') as f:
         nodes=f["trajectory_0/nodes"][:]; faces=f["trajectory_0/faces"][:]
         temp=f["trajectory_0/node_features"][:]; 
-        src=f["trajectory_0/source_terms"][:]; time=f["trajectory_0/time_points"][:]
+        time=f["trajectory_0/time_points"][:]
     triangulation = tri.Triangulation(nodes[:, 0], nodes[:, 1], faces)
 
     # For temperature, use percentile to avoid extreme peaks washing out the colormap
@@ -526,9 +497,6 @@ def visualize_results():
     else:
         vmax_temp = T_ambient + 1.0 # Default if no significant heating
     plot_snapshot(triangulation, time, temp, "Temperature (K)", "hot", snapshots_vis_filename, vmin=T_ambient, vmax=vmax_temp)
-    
-    vmax_src = np.percentile(src[src > 1e-9], 99.9) if (src > 1e-9).any() else 1e-9
-    plot_snapshot(triangulation, time, src, "Heat Source (W/m³)", "hot", source_vis_filename, vmin=0, vmax=vmax_src)
 
 def plot_snapshot(tri, time, data, label, cmap, filename, vmin, vmax):
     if MPI.COMM_WORLD.rank != 0: return
@@ -547,11 +515,9 @@ def plot_snapshot(tri, time, data, label, cmap, filename, vmin, vmax):
     fig.colorbar(mappable, cax=cbar_ax, orientation='horizontal', label=label)
     plt.savefig(filename)
     plt.close()
-    print(f"{label.split(' ')[0]} snapshots saved to: {filename}")
+    print(f"Saved snapshots: {filename}")
 
-# =============================================================================
-# --- Main Execution ---
-# =============================================================================
+# Main Execution
 if __name__ == "__main__":
     generate_dataset()
     MPI.COMM_WORLD.barrier()
